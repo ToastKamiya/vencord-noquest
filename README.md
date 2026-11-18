@@ -10,6 +10,7 @@ It targets the Quest tab, Quest navigation links, and the promo cards Discord dr
 - Removes Quest promo cards from the main UI.
 - Watches for Quest cards that render after startup.
 - Hides the full promo card container instead of leaving an empty shell behind.
+- Redirects to your DMs if Discord opens the Quests tab on startup.
 
 ## Requirements
 

@@ -5,7 +5,7 @@
  */
 
 import definePlugin, { StartAt } from "@utils/types";
-import { FluxDispatcher, RestAPI } from "@webpack/common";
+import { FluxDispatcher, NavigationRouter, RestAPI } from "@webpack/common";
 
 import managedStyle from "./style.css?managed";
 
@@ -15,11 +15,19 @@ const QUEST_ACTION_PATTERN = /\b(?:watch\s*\d+\s*(?:s|sec|secs|seconds?|m|min|mi
 const QUEST_CARD_PATTERN = /\b(?:promoted|quests?|avatar decoration|decorations?|with nitro|orbs?|reward)\b/i;
 const QUEST_STRONG_CARD_PATTERN = /\b(?:promoted|quests?)\b/i;
 const QUEST_DELIVERY_PLACEMENTS = [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 15, 18];
+const QUESTS_ROUTE_PATTERN = /(?:^|\/)quests(?:\/|$)/i;
+const DEFAULT_ROUTE = "/channels/@me";
+const STARTUP_ROUTE_WATCH_MS = 30_000;
+const ROUTE_POLL_INTERVAL_MS = 500;
+const MAX_STARTUP_REDIRECTS = 5;
 
 let observer: MutationObserver | null = null;
 let scanTimer: number | undefined;
 let startRetryId: number | undefined;
 let started = false;
+let routeWatchTimer: number | undefined;
+let routeWatchUntil = 0;
+let startupRedirects = 0;
 const pendingScanRoots = new Set<Element>();
 let originalFetch: typeof window.fetch | null = null;
 let originalDispatch: typeof FluxDispatcher.dispatch | null = null;
@@ -102,6 +110,40 @@ function clearDeliveredQuests() {
     for (const placement of QUEST_DELIVERY_PLACEMENTS) {
         FluxDispatcher.dispatch(makeEmptyQuestDeliveryAction(placement) as any);
     }
+}
+
+function isQuestsRoute() {
+    return QUESTS_ROUTE_PATTERN.test(`${window.location.pathname}${window.location.hash}`);
+}
+
+function redirectAwayFromQuests() {
+    if (startupRedirects >= MAX_STARTUP_REDIRECTS || !isQuestsRoute()) return;
+
+    startupRedirects++;
+    NavigationRouter.transitionTo(DEFAULT_ROUTE);
+}
+
+function watchStartupRoute() {
+    if (routeWatchTimer != null) return;
+
+    routeWatchUntil = Date.now() + STARTUP_ROUTE_WATCH_MS;
+    redirectAwayFromQuests();
+
+    routeWatchTimer = window.setInterval(() => {
+        if (Date.now() >= routeWatchUntil) {
+            stopWatchingStartupRoute();
+            return;
+        }
+
+        redirectAwayFromQuests();
+    }, ROUTE_POLL_INTERVAL_MS);
+}
+
+function stopWatchingStartupRoute() {
+    if (routeWatchTimer == null) return;
+
+    window.clearInterval(routeWatchTimer);
+    routeWatchTimer = undefined;
 }
 
 function getRequestUrl(input: RequestInfo | URL) {
@@ -394,6 +436,7 @@ export default definePlugin({
         patchRestAPI();
         patchFluxDispatcher();
         clearDeliveredQuests();
+        watchStartupRoute();
         startScanning();
     },
 
@@ -402,6 +445,7 @@ export default definePlugin({
         unpatchFetch();
         unpatchRestAPI();
         unpatchFluxDispatcher();
+        stopWatchingStartupRoute();
 
         if (startRetryId != null) {
             window.clearTimeout(startRetryId);
